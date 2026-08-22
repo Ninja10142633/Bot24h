@@ -32,6 +32,7 @@ function createBot() {
       port: CONFIG.port,
       username: CONFIG.username,
       offline: CONFIG.offline,
+      raknetBackend: 'jsp-raknet',
     });
   } catch (err) {
     console.log(`[ERRO] Falha ao criar cliente: ${err.message}`);
