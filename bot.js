@@ -4,7 +4,7 @@ const bedrock = require('bedrock-protocol');
 //  Configurações do Bot
 // ═══════════════════════════════════════════════════
 const CONFIG = {
-  host: 'Dragon-wBwO.aternos.me',
+  host: 'Takashi_Mmoonligth.aternos.me',
   port: 18869,
   username: 'BotVigia',
   offline: true,                 // modo offline (não precisa de conta Xbox)
