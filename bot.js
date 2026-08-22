@@ -1,4 +1,4 @@
-const mineflayer = require('mineflayer');
+const bedrock = require('bedrock-protocol');
 
 // ═══════════════════════════════════════════════════
 //  Configurações do Bot
@@ -7,13 +7,12 @@ const CONFIG = {
   host: 'Dragon-wBwO.aternos.me',
   port: 18869,
   username: 'BotVigia',
-  version: false,              // auto-detecta a versão do servidor
-  hideErrors: false,
-  reconnectDelay: 15000,       // 15 segundos para reconectar
-  antiAfkInterval: 5 * 60000,  // 5 minutos entre ações anti-AFK
+  offline: true,                 // modo offline (não precisa de conta Xbox)
+  reconnectDelay: 15000,         // 15 segundos para reconectar
+  antiAfkInterval: 5 * 60000,   // 5 minutos entre ações anti-AFK
 };
 
-let bot = null;
+let client = null;
 let antiAfkTimer = null;
 let reconnecting = false;
 
@@ -27,60 +26,64 @@ function createBot() {
 
   reconnecting = false;
 
-  bot = mineflayer.createBot({
-    host: CONFIG.host,
-    port: CONFIG.port,
-    username: CONFIG.username,
-    version: CONFIG.version,
-    hideErrors: CONFIG.hideErrors,
-  });
+  try {
+    client = bedrock.createClient({
+      host: CONFIG.host,
+      port: CONFIG.port,
+      username: CONFIG.username,
+      offline: CONFIG.offline,
+    });
+  } catch (err) {
+    console.log(`[ERRO] Falha ao criar cliente: ${err.message}`);
+    scheduleReconnect();
+    return;
+  }
 
-  // ── Evento: Login bem-sucedido ──
-  bot.on('login', () => {
-    console.log(`[✔] Bot "${bot.username}" logou com sucesso!`);
-  });
-
-  // ── Evento: Spawn no mundo ──
-  bot.on('spawn', () => {
-    console.log('[✔] Bot entrou no mundo!');
-    console.log(`[INFO] Posição: X=${Math.floor(bot.entity.position.x)} Y=${Math.floor(bot.entity.position.y)} Z=${Math.floor(bot.entity.position.z)}`);
+  // ── Evento: Conectou ao servidor ──
+  client.on('join', () => {
+    console.log(`[✔] Bot "${CONFIG.username}" conectou ao servidor Bedrock!`);
     startAntiAfk();
   });
 
-  // ── Evento: Mensagem do chat ──
-  bot.on('chat', (username, message) => {
-    if (username === bot.username) return;
-    console.log(`[CHAT] <${username}> ${message}`);
+  // ── Evento: Spawn no mundo ──
+  client.on('spawn', () => {
+    console.log('[✔] Bot entrou no mundo!');
   });
 
-  // ── Evento: Mensagem do sistema ──
-  bot.on('message', (jsonMsg) => {
-    const msg = jsonMsg.toString().trim();
-    if (msg.length > 0) {
-      console.log(`[SISTEMA] ${msg}`);
+  // ── Evento: Mensagem do chat ──
+  client.on('text', (packet) => {
+    const msg = packet.message || packet.parameters?.join(' ') || '';
+    if (msg.trim().length > 0) {
+      console.log(`[CHAT] ${msg}`);
     }
   });
 
-  // ── Evento: Saúde atualizada ──
-  bot.on('health', () => {
-    console.log(`[HP] Vida: ${bot.health.toFixed(1)} | Fome: ${bot.food} | Saturação: ${bot.foodSaturation.toFixed(1)}`);
+  // ── Evento: Desconexão ──
+  client.on('disconnect', (packet) => {
+    const reason = packet.message || 'desconhecida';
+    console.log(`[✖] Desconectado do servidor. Razão: ${reason}`);
+    stopAntiAfk();
+    scheduleReconnect();
   });
 
   // ── Evento: Kicked ──
-  bot.on('kicked', (reason, loggedIn) => {
+  client.on('kick', (packet) => {
+    const reason = packet.message || 'desconhecida';
     console.log(`[✖] Bot foi kickado! Razão: ${reason}`);
     stopAntiAfk();
     scheduleReconnect();
   });
 
   // ── Evento: Erro ──
-  bot.on('error', (err) => {
+  client.on('error', (err) => {
     console.log(`[ERRO] ${err.message}`);
+    stopAntiAfk();
+    scheduleReconnect();
   });
 
-  // ── Evento: Desconexão ──
-  bot.on('end', (reason) => {
-    console.log(`[✖] Conexão encerrada. Razão: ${reason || 'desconhecida'}`);
+  // ── Evento: Conexão fechada ──
+  client.on('close', () => {
+    console.log('[✖] Conexão fechada.');
     stopAntiAfk();
     scheduleReconnect();
   });
@@ -92,24 +95,41 @@ function createBot() {
 function startAntiAfk() {
   stopAntiAfk(); // limpa timer anterior se existir
 
-  console.log('[ANTI-AFK] Sistema anti-AFK ativado (pulo a cada 5 min)');
+  console.log('[ANTI-AFK] Sistema anti-AFK ativado (ações a cada 5 min)');
 
   antiAfkTimer = setInterval(() => {
-    if (bot && bot.entity) {
-      // Pula
-      bot.setControlState('jump', true);
-      setTimeout(() => bot.setControlState('jump', false), 500);
+    if (client) {
+      try {
+        // Envia pacote de movimento do jogador (simulando movimento)
+        client.queue('move_player', {
+          runtime_id: 1n,
+          position: {
+            x: Math.random() * 0.5,
+            y: 0,
+            z: Math.random() * 0.5,
+          },
+          pitch: Math.random() * 360,
+          yaw: Math.random() * 360,
+          head_yaw: Math.random() * 360,
+          mode: 'normal',
+          on_ground: true,
+          ridden_runtime_id: 0n,
+          tick: 0n,
+        });
 
-      // Gira levemente a câmera (rotação aleatória)
-      const yaw = (Math.random() * Math.PI * 2) - Math.PI;
-      const pitch = (Math.random() * 0.5) - 0.25;
-      bot.look(yaw, pitch, false);
+        // Envia pacote de ação (pular)
+        client.queue('player_action', {
+          runtime_entity_id: 1n,
+          action: 'jump',
+          position: { x: 0, y: 0, z: 0 },
+          result_position: { x: 0, y: 0, z: 0 },
+          face: 0,
+        });
 
-      // Anda um pouco para frente e para
-      bot.setControlState('forward', true);
-      setTimeout(() => bot.setControlState('forward', false), 600);
-
-      console.log('[ANTI-AFK] Ação anti-AFK executada (pulo + rotação + movimento)');
+        console.log('[ANTI-AFK] Ação anti-AFK executada (movimento + pulo)');
+      } catch (err) {
+        console.log(`[ANTI-AFK] Erro ao executar ação: ${err.message}`);
+      }
     }
   }, CONFIG.antiAfkInterval);
 }
@@ -143,7 +163,7 @@ function scheduleReconnect() {
 console.log('');
 console.log('╔═══════════════════════════════════════════╗');
 console.log('║       🤖  BOT VIGIA - MINECRAFT AFK      ║');
-console.log('║  Anti-AFK + Reconexão Automática          ║');
+console.log('║  Bedrock Edition | Anti-AFK + Reconexão   ║');
 console.log('╚═══════════════════════════════════════════╝');
 console.log('');
 
@@ -153,8 +173,8 @@ createBot();
 process.on('SIGINT', () => {
   console.log('\n[BOT] Desligando bot...');
   stopAntiAfk();
-  if (bot) {
-    bot.quit('Bot desligado pelo operador.');
+  if (client) {
+    client.close();
   }
   setTimeout(() => process.exit(0), 1000);
 });
